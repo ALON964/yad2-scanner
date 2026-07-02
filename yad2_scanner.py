@@ -13,10 +13,10 @@ from datetime import datetime
 # הגדרות - מלא כאן את הפרטים שלך
 # ============================================================
 
-TWILIO_ACCOUNT_SID = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # מ-Twilio Console
-TWILIO_AUTH_TOKEN  = "your_auth_token_here"                # מ-Twilio Console
-TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"             # מספר Twilio קבוע
-MY_WHATSAPP_NUMBER   = "whatsapp:+9725XXXXXXXX"            # המספר שלך עם קידומת ישראל
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")  # מ-Twilio Console
+TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN")                # מ-Twilio Console
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM")             # מספר Twilio קבוע
+MY_WHATSAPP_NUMBER   = os.environ.get("MY_WHATSAPP_NUMBER")            # המספר שלך עם קידומת ישראל
 
 # כל כמה דקות לסרוק (מומלץ 10)
 SCAN_INTERVAL_MINUTES = 10
