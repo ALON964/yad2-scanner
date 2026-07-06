@@ -22,24 +22,19 @@ TWILIO_AUTH_TOKEN    = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM")
 MY_WHATSAPP_NUMBER   = os.environ.get("MY_WHATSAPP_NUMBER")
 
-# כל כמה דקות לסרוק (מומלץ 10)
 SCAN_INTERVAL_MINUTES = 10
-
-# קובץ לשמור מודעות שכבר ראינו
 SEEN_FILE = "seen_ads.json"
 
 # ============================================================
 # קריטריונים לחיפוש
 # ============================================================
 
-# מקסימום ק"מ לפי שנת ייצור (10,000 ק"מ לשנה)
 CURRENT_YEAR = datetime.now().year
 MAX_KM_BY_YEAR = {
     year: (CURRENT_YEAR - year + 1) * 10000
     for year in range(2019, CURRENT_YEAR + 1)
 }
 
-# דגמים לחיפוש
 SEARCHES = [
     {"name": "סובארו פורסטר",    "manufacturer": 34, "model": 278},
     {"name": "טויוטה RAV4",       "manufacturer": 39, "model": 302},
@@ -51,7 +46,21 @@ SEARCHES = [
 
 MAX_PRICE = 120000
 MIN_YEAR  = 2019
-HAND      = 1  # יד ראשונה בלבד
+HAND      = 1
+
+# ============================================================
+# Headers מלאים שמדמים דפדפן אמיתי
+# ============================================================
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.yad2.co.il/vehicles/cars",
+    "Origin": "https://www.yad2.co.il",
+    "Connection": "keep-alive",
+}
 
 # ============================================================
 # פונקציות
@@ -70,7 +79,6 @@ def save_seen_ads(seen):
 
 
 def send_whatsapp(message):
-    """שולח הודעת וואטסאפ דרך Twilio"""
     try:
         from twilio.rest import Client
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
@@ -85,8 +93,11 @@ def send_whatsapp(message):
 
 
 def fetch_ads(manufacturer, model, year, max_km):
-    """מושך מודעות מ-API של יד2"""
-    url = "https://gw.yad2.co.il/feed-search-legacy/vehicles/cars"
+    # ניסיון ראשון - API חדש
+    urls = [
+        "https://gw.yad2.co.il/feed-search-legacy/vehicles/cars",
+        "https://www.yad2.co.il/api/pre-load/getFeedIndex/vehicles/cars",
+    ]
     params = {
         "manufacturer": manufacturer,
         "model": model,
@@ -94,30 +105,37 @@ def fetch_ads(manufacturer, model, year, max_km):
         "km": f"-{max_km}",
         "price": f"-{MAX_PRICE}",
         "hand": HAND,
-        "forceLdLoad": True,
     }
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-    }
+
+    session = requests.Session()
+    # פתיחת עמוד ראשי קודם כדי לקבל cookies
     try:
-        resp = requests.get(url, params=params, headers=headers, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("data", {}).get("feed", {}).get("feed_items", [])
-    except Exception as e:
-        print(f"⚠️ שגיאה בשליפה: {e}")
-        return []
+        session.get("https://www.yad2.co.il/vehicles/cars", headers=HEADERS, timeout=10)
+    except:
+        pass
+
+    for url in urls:
+        try:
+            resp = session.get(url, params=params, headers=HEADERS, timeout=15)
+            print(f"   status: {resp.status_code}, size: {len(resp.text)} chars")
+            if resp.status_code == 200 and len(resp.text) > 10:
+                data = resp.json()
+                items = data.get("data", {}).get("feed", {}).get("feed_items", [])
+                if items is not None:
+                    return items
+        except Exception as e:
+            print(f"   ⚠️ שגיאה: {e}")
+            continue
+
+    return []
 
 
 def check_km_valid(ad_km, year):
-    """בודק שהקילומטראז' לא עולה על 10,000 ק"מ לשנה"""
     max_km = MAX_KM_BY_YEAR.get(year, 999999)
     return ad_km <= max_km
 
 
 def scan_all():
-    """סורק את כל הדגמים ומחזיר רשימת מודעות חדשות"""
     seen = load_seen_ads()
     new_ads = []
 
@@ -151,7 +169,7 @@ def scan_all():
                     "city":  ad.get("city", ""),
                     "link":  f"https://www.yad2.co.il/item/{ad_id}",
                 })
-            time.sleep(1)
+            time.sleep(2)
 
     save_seen_ads(seen)
     return new_ads
@@ -183,7 +201,6 @@ if __name__ == "__main__":
     print(f"💰 מחיר מקסימלי: {MAX_PRICE:,} ₪")
     print(f"🚙 דגמים: {', '.join(s['name'] for s in SEARCHES)}")
 
-    # בדיקת תקינות משתני הסביבה
     if not TWILIO_ACCOUNT_SID:
         print("❌ שגיאה: TWILIO_ACCOUNT_SID לא הוגדר!")
     if not TWILIO_AUTH_TOKEN:
@@ -192,7 +209,6 @@ if __name__ == "__main__":
         print("❌ שגיאה: MY_WHATSAPP_NUMBER לא הוגדר!")
     else:
         print(f"✅ וואטסאפ מוגדר ל: {MY_WHATSAPP_NUMBER}")
-        # שליחת הודעת פתיחה לבדיקה
         send_whatsapp("✅ סורק יד2 עלה בהצלחה! אחפש לך רכב כל 10 דקות 🚗")
 
     while True:
