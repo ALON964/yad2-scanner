@@ -1,24 +1,30 @@
 """
-סקריפט סריקת יד2 - SUV/קרוסאובר גדול (פורסטר וכד')
-שולח התראת וואטסאפ כשמוצאת מודעה חדשה שעומדת בקריטריונים
-משתמש בחבילת yad2-scraper שמטפלת בחסימות אוטומטית
+סקריפט סריקת יד2 - SUV/קרוסאובר גדול
+שולח התראת Telegram כשמוצאת מודעה חדשה שעומדת בקריטריונים
 """
 
 import sys
 import json
 import time
 import os
+import requests
 from datetime import datetime
 
 sys.stdout.reconfigure(line_buffering=True)
 
-TWILIO_ACCOUNT_SID   = os.environ.get("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN    = os.environ.get("TWILIO_AUTH_TOKEN")
-TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM")
-MY_WHATSAPP_NUMBER   = os.environ.get("MY_WHATSAPP_NUMBER")
+# ============================================================
+# הגדרות - נקראות מ-Environment Variables ב-Render
+# ============================================================
+
+TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 SCAN_INTERVAL_MINUTES = 10
 SEEN_FILE = "seen_ads.json"
+
+# ============================================================
+# קריטריונים לחיפוש
+# ============================================================
 
 CURRENT_YEAR = datetime.now().year
 MAX_KM_BY_YEAR = {
@@ -39,6 +45,9 @@ MAX_PRICE = 120000
 MIN_YEAR  = 2019
 HAND      = 1
 
+# ============================================================
+# פונקציות
+# ============================================================
 
 def load_seen_ads():
     if os.path.exists(SEEN_FILE):
@@ -52,18 +61,20 @@ def save_seen_ads(seen):
         json.dump(list(seen), f)
 
 
-def send_whatsapp(message):
+def send_telegram(message):
     try:
-        from twilio.rest import Client
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        client.messages.create(
-            body=message,
-            from_=TWILIO_WHATSAPP_FROM,
-            to=MY_WHATSAPP_NUMBER
-        )
-        print(f"📱 נשלחה הודעה בהצלחה!")
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        resp = requests.post(url, json={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }, timeout=10)
+        if resp.status_code == 200:
+            print("📱 נשלחה הודעת Telegram בהצלחה!")
+        else:
+            print(f"❌ שגיאה בשליחת Telegram: {resp.text}")
     except Exception as e:
-        print(f"❌ שגיאה בשליחת וואטסאפ: {e}")
+        print(f"❌ שגיאה בשליחת Telegram: {e}")
 
 
 def fetch_ads_for_model(car):
@@ -146,7 +157,7 @@ def format_message(ad):
     except:
         price_str = f"{ad['price']} ₪"
     return (
-        f"🚗 מציאה ביד2!\n"
+        f"🚗 <b>מציאה ביד2!</b>\n"
         f"רכב: {ad['name']} {ad['year']}\n"
         f"קילומטראז': {ad['km']:,} ק\"מ\n"
         f"מחיר: {price_str}\n"
@@ -155,6 +166,10 @@ def format_message(ad):
     )
 
 
+# ============================================================
+# לולאה ראשית
+# ============================================================
+
 if __name__ == "__main__":
     print("🚀 סורק יד2 מתחיל לעבוד!")
     print(f"⏱ סריקה כל {SCAN_INTERVAL_MINUTES} דקות")
@@ -162,13 +177,13 @@ if __name__ == "__main__":
     print(f"💰 מחיר מקסימלי: {MAX_PRICE:,} ₪")
     print(f"🚙 דגמים: {', '.join(c['name'] for c in CAR_MODELS)}")
 
-    if not TWILIO_ACCOUNT_SID:
-        print("❌ שגיאה: TWILIO_ACCOUNT_SID לא הוגדר!")
-    elif not MY_WHATSAPP_NUMBER:
-        print("❌ שגיאה: MY_WHATSAPP_NUMBER לא הוגדר!")
+    if not TELEGRAM_TOKEN:
+        print("❌ שגיאה: TELEGRAM_TOKEN לא הוגדר!")
+    elif not TELEGRAM_CHAT_ID:
+        print("❌ שגיאה: TELEGRAM_CHAT_ID לא הוגדר!")
     else:
-        print(f"✅ וואטסאפ מוגדר ל: {MY_WHATSAPP_NUMBER}")
-        send_whatsapp("✅ סורק יד2 עלה בהצלחה! אחפש לך רכב כל 10 דקות 🚗")
+        print(f"✅ Telegram מוגדר!")
+        send_telegram("✅ סורק יד2 עלה בהצלחה! אחפש לך רכב כל 10 דקות 🚗")
 
     while True:
         print(f"\n⏰ {datetime.now().strftime('%H:%M:%S')} - מתחיל סריקה...")
@@ -178,7 +193,7 @@ if __name__ == "__main__":
             print(f"✅ נמצאו {len(new_ads)} מודעות חדשות!")
             for ad in new_ads:
                 msg = format_message(ad)
-                send_whatsapp(msg)
+                send_telegram(msg)
                 time.sleep(2)
         else:
             print("😴 אין מודעות חדשות")
