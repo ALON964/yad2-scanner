@@ -1,3 +1,2 @@
 requests==2.31.0
-twilio==8.10.0
 yad2-scraper==0.4.0
