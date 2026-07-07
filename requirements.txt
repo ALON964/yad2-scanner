@@ -1,2 +1,2 @@
 requests==2.31.0
-yad2-scraper==0.3.0
+yad2-scraper==0.5.3
