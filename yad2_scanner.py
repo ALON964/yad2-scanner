@@ -1,6 +1,6 @@
 """
 סקריפט סריקת יד2 - SUV/קרוסאובר גדול
-שולח התראת Telegram כשמוצאת מודעה חדשה שעומדת בקריטריונים
+שולח התראת Telegram כשמוצאת מודעה חדשה
 """
 
 import sys
@@ -12,19 +12,11 @@ from datetime import datetime
 
 sys.stdout.reconfigure(line_buffering=True)
 
-# ============================================================
-# הגדרות - נקראות מ-Environment Variables ב-Render
-# ============================================================
-
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 SCAN_INTERVAL_MINUTES = 10
 SEEN_FILE = "seen_ads.json"
-
-# ============================================================
-# קריטריונים לחיפוש
-# ============================================================
 
 CURRENT_YEAR = datetime.now().year
 MAX_KM_BY_YEAR = {
@@ -45,9 +37,14 @@ MAX_PRICE = 120000
 MIN_YEAR  = 2019
 HAND      = 1
 
-# ============================================================
-# פונקציות
-# ============================================================
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8",
+    "Referer": "https://www.yad2.co.il/vehicles/cars",
+    "Origin": "https://www.yad2.co.il",
+}
+
 
 def load_seen_ads():
     if os.path.exists(SEEN_FILE):
@@ -72,80 +69,96 @@ def send_telegram(message):
         if resp.status_code == 200:
             print("📱 נשלחה הודעת Telegram בהצלחה!")
         else:
-            print(f"❌ שגיאה בשליחת Telegram: {resp.text}")
+            print(f"❌ שגיאה: {resp.text}")
     except Exception as e:
-        print(f"❌ שגיאה בשליחת Telegram: {e}")
+        print(f"❌ שגיאה: {e}")
 
 
-def fetch_ads_for_model(car):
+def fetch_ads(manufacturer_id, model_id, year):
+    """שליפה ישירה מ-API של יד2"""
+    max_km = MAX_KM_BY_YEAR.get(year, 999999)
+    session = requests.Session()
+
+    # קבלת cookies
     try:
-        from yad2_scraper.vehicles import fetch_vehicle_category, VehiclesQueryFilters, OrderVehiclesBy
+        session.get("https://www.yad2.co.il/vehicles/cars", headers=HEADERS, timeout=10)
+        time.sleep(1)
+    except:
+        pass
 
-        filters = VehiclesQueryFilters(
-            price_range=(0, MAX_PRICE),
-            year_range=(MIN_YEAR, CURRENT_YEAR),
-            order_by=OrderVehiclesBy.DATE,
-        )
+    url = "https://gw.yad2.co.il/feed-search-legacy/vehicles/cars"
+    params = {
+        "manufacturer": manufacturer_id,
+        "model": model_id,
+        "year": f"{year}-{year}",
+        "km": f"-{max_km}",
+        "price": f"-{MAX_PRICE}",
+        "hand": HAND,
+        "page": 1,
+    }
 
-        category = fetch_vehicle_category("cars", **filters.__dict__)
-        items = []
+    try:
+        resp = session.get(url, params=params, headers=HEADERS, timeout=15)
+        if resp.status_code != 200:
+            print(f"   HTTP {resp.status_code}")
+            return []
 
-        for page_data in category.load_next_data().get_data():
-            try:
-                manufacturer = str(page_data.manufacturer(None) or "").upper()
-                model = str(page_data.model(None) or "").upper()
-
-                if car["manufacturer"] not in manufacturer and car["model"] not in model:
-                    continue
-
-                ad_id    = str(page_data.id or "")
-                ad_km    = int(page_data.km or 0)
-                ad_year  = int(page_data.year or 0)
-                ad_price = int(page_data.price or 0)
-                ad_hand  = int(page_data.hand or 0)
-
-                if ad_hand != HAND:
-                    continue
-
-                max_km = MAX_KM_BY_YEAR.get(ad_year, 999999)
-                if ad_km > max_km:
-                    continue
-
-                items.append({
-                    "id":    ad_id,
-                    "name":  car["name"],
-                    "year":  ad_year,
-                    "km":    ad_km,
-                    "price": ad_price,
-                    "city":  str(page_data.city or ""),
-                    "link":  f"https://www.yad2.co.il/item/{ad_id}",
-                })
-            except Exception:
-                continue
-
-        return items
-
+        data = resp.json()
+        items = data.get("data", {}).get("feed", {}).get("feed_items", [])
+        return [i for i in items if i.get("type") == "ad"]
     except Exception as e:
-        print(f"   ⚠️ שגיאה בשליפת {car['name']}: {e}")
+        print(f"   ⚠️ שגיאה: {e}")
         return []
+
+
+# מיפוי ID של יצרנים ודגמים ביד2
+CAR_IDS = [
+    {"name": "סובארו פורסטר",    "manufacturer_id": 34,  "model_id": 278},
+    {"name": "טויוטה RAV4",       "manufacturer_id": 39,  "model_id": 302},
+    {"name": "קיה ספורטאג",       "manufacturer_id": 23,  "model_id": 189},
+    {"name": "יונדאי טוסון",      "manufacturer_id": 20,  "model_id": 156},
+    {"name": "סקודה קודיאק",      "manufacturer_id": 35,  "model_id": 931},
+    {"name": "מיצובישי אאוטלנדר", "manufacturer_id": 26,  "model_id": 204},
+]
 
 
 def scan_all():
     seen = load_seen_ads()
     new_ads = []
 
-    for car in CAR_MODELS:
-        print(f"🔍 סורק {car['name']}...")
-        ads = fetch_ads_for_model(car)
-        print(f"   נמצאו {len(ads)} מודעות רלוונטיות")
+    for car in CAR_IDS:
+        for year in range(MIN_YEAR, CURRENT_YEAR + 1):
+            print(f"🔍 {car['name']} {year}...")
+            ads = fetch_ads(car["manufacturer_id"], car["model_id"], year)
+            print(f"   {len(ads)} תוצאות")
 
-        for ad in ads:
-            if not ad["id"] or ad["id"] in seen:
-                continue
-            seen.add(ad["id"])
-            new_ads.append(ad)
+            for ad in ads:
+                ad_id = str(ad.get("id", ""))
+                if not ad_id or ad_id in seen:
+                    continue
 
-        time.sleep(3)
+                try:
+                    ad_km    = int(ad.get("kilometers", 0))
+                    ad_year  = int(ad.get("year", 0))
+                    ad_price = int(str(ad.get("price", "0")).replace(",", "").replace("₪", "").strip() or 0)
+                except:
+                    continue
+
+                max_km = MAX_KM_BY_YEAR.get(ad_year, 999999)
+                if ad_km > max_km:
+                    continue
+
+                seen.add(ad_id)
+                new_ads.append({
+                    "id":    ad_id,
+                    "name":  car["name"],
+                    "year":  ad_year,
+                    "km":    ad_km,
+                    "price": ad_price,
+                    "city":  ad.get("city", ""),
+                    "link":  f"https://www.yad2.co.il/item/{ad_id}",
+                })
+            time.sleep(2)
 
     save_seen_ads(seen)
     return new_ads
@@ -166,23 +179,16 @@ def format_message(ad):
     )
 
 
-# ============================================================
-# לולאה ראשית
-# ============================================================
-
 if __name__ == "__main__":
     print("🚀 סורק יד2 מתחיל לעבוד!")
     print(f"⏱ סריקה כל {SCAN_INTERVAL_MINUTES} דקות")
     print(f"📅 שנים: {MIN_YEAR}-{CURRENT_YEAR}")
     print(f"💰 מחיר מקסימלי: {MAX_PRICE:,} ₪")
-    print(f"🚙 דגמים: {', '.join(c['name'] for c in CAR_MODELS)}")
 
-    if not TELEGRAM_TOKEN:
-        print("❌ שגיאה: TELEGRAM_TOKEN לא הוגדר!")
-    elif not TELEGRAM_CHAT_ID:
-        print("❌ שגיאה: TELEGRAM_CHAT_ID לא הוגדר!")
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ חסרים פרטי Telegram!")
     else:
-        print(f"✅ Telegram מוגדר!")
+        print("✅ Telegram מוגדר!")
         send_telegram("✅ סורק יד2 עלה בהצלחה! אחפש לך רכב כל 10 דקות 🚗")
 
     while True:
@@ -192,11 +198,10 @@ if __name__ == "__main__":
         if new_ads:
             print(f"✅ נמצאו {len(new_ads)} מודעות חדשות!")
             for ad in new_ads:
-                msg = format_message(ad)
-                send_telegram(msg)
+                send_telegram(format_message(ad))
                 time.sleep(2)
         else:
             print("😴 אין מודעות חדשות")
 
-        print(f"💤 ממתין {SCAN_INTERVAL_MINUTES} דקות לסריקה הבאה...")
+        print(f"💤 ממתין {SCAN_INTERVAL_MINUTES} דקות...")
         time.sleep(SCAN_INTERVAL_MINUTES * 60)
